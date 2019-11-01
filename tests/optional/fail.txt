@@ -1,0 +1,19 @@
+optional_nullopt_nullopt_t_fail                            ./optional.nullopt/nullopt_t.fail.cpp
+optional_object_optional_object_ctor_ctor_fail             ./optional.object/optional.object.ctor/ctor.fail.cpp
+optional_object_optional_object_ctor_deduct_fail           ./optional.object/optional.object.ctor/deduct.fail.cpp
+optional_object_optional_object_ctor_move_fail             ./optional.object/optional.object.ctor/move.fail.cpp
+optional_object_optional_object_observe_value_const_fail   ./optional.object/optional.object.observe/value_const.fail.cpp
+optional_object_optional_requires_destructible_object_fail ./optional.object/optional_requires_destructible_object.fail.cpp
+optional_syn_optional_in_place_t_fail                      ./optional.syn/optional_in_place_t.fail.cpp
+optional_syn_optional_nullopt_t_fail                       ./optional.syn/optional_nullopt_t.fail.cpp
+
+
+optional_nullopt_nullopt_t_fail
+optional_object_optional_object_ctor_ctor_fail
+optional_object_optional_object_ctor_deduct_fail
+optional_object_optional_object_ctor_move_fail
+optional_object_optional_object_observe_value_const_fail
+optional_object_optional_requires_destructible_object_fail
+optional_syn_optional_in_place_t_fail
+optional_syn_optional_nullopt_t_fail
+

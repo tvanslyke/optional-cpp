@@ -3,6 +3,7 @@
 
 #include <type_traits>
 #include <memory>
+#include <exception>
 
 namespace tim {
 
@@ -12,7 +13,6 @@ template <class T>
 struct Optional;
 
 class BadOptionalAccess;
-
 
 namespace detail {
 
@@ -24,10 +24,19 @@ inline constexpr empty_tag_t empty_tag = empty_tag_t{};
 struct in_place_t {};
 inline constexpr in_place_t in_place = in_place_t{};
 
-struct nullopt_t {};
-inline constexpr nullopt_t nullopy = nullopt_t{};
+struct nullopt_t {
+	nullopt_t() = delete;
+	nullopt_t(const nullopt_t&) = default;
+	nullopt_t(nullopt_t&&) = default;
+	explicit constexpr nullopt_t(int) noexcept {}
 
-class BadOptionalAccess: std::exception {
+	nullopt_t& operator=(const nullopt_t&) = default;
+	nullopt_t& operator=(nullopt_t&&) = default;
+
+};
+inline constexpr nullopt_t nullopt = nullopt_t{{}};
+
+class BadOptionalAccess: public std::exception {
 public:
 	BadOptionalAccess() noexcept = default;
 
@@ -43,6 +52,12 @@ using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
 
 template <class T>
 using is_cv_void = std::is_same<std::remove_cv_t<T>, void>;
+
+template <class T>
+struct is_optional: std::false_type {};
+
+template <class T>
+struct is_optional<Optional<T>>: std::true_type {};
 
 template <class T>
 inline constexpr bool is_cv_void_v = is_cv_void<T>::value;
@@ -292,6 +307,7 @@ struct OptionalUnionImpl<MemberStatus::Defined, T> {
 	};
 };
 
+template <>
 struct OptionalUnionImpl<MemberStatus::Defaulted, void> {
 
 	constexpr OptionalUnionImpl() = default;
@@ -306,6 +322,7 @@ struct OptionalUnionImpl<MemberStatus::Defaulted, void> {
 
 };
 
+template <>
 struct OptionalUnionImpl<MemberStatus::Defaulted, const void> {
 
 	constexpr OptionalUnionImpl() = default;
@@ -320,6 +337,7 @@ struct OptionalUnionImpl<MemberStatus::Defaulted, const void> {
 
 };
 
+template <>
 struct OptionalUnionImpl<MemberStatus::Defaulted, volatile void> {
 
 	constexpr OptionalUnionImpl() = default;
@@ -334,6 +352,7 @@ struct OptionalUnionImpl<MemberStatus::Defaulted, volatile void> {
 
 };
 
+template <>
 struct OptionalUnionImpl<MemberStatus::Defaulted, const volatile void> {
 
 	constexpr OptionalUnionImpl() = default;
@@ -350,12 +369,12 @@ struct OptionalUnionImpl<MemberStatus::Defaulted, const volatile void> {
 
 template <class T>
 using OptionalUnion = std::conditional_t<
-	std::disjunction<
+	std::disjunction_v<
 		detail::is_cv_void<T>,
 		std::is_destructible<T>
-	>
+	>,
 	std::conditional_t<
-		std::disjunction<
+		std::disjunction_v<
 			detail::is_cv_void<T>,
 			std::is_trivially_destructible<T>
 		>,
@@ -448,9 +467,6 @@ struct OptionalBaseMethods<T, true> {
 
 	}
 
-	constexpr const value_type& value() const { return std::launder(std::addressof(data_.value))->value(); }
-	constexpr       value_type& value()       { return std::launder(std::addressof(data_.value))->value(); }
-
 	constexpr const bool& has_value() const noexcept { return has_value_; }
 	constexpr bool&       has_value()       noexcept { return has_value_; }
 
@@ -487,7 +503,7 @@ struct OptionalMoveAssign;
 
 template <class T>
 using optional_destructor_type = std::conditional_t<
-	std::disjunction<
+	std::disjunction_v<
 		detail::is_cv_void<T>,
 		std::is_trivially_destructible<T>
 	>,
@@ -502,18 +518,20 @@ using optional_default_constructor_type = std::conditional_t<
 		std::is_default_constructible<T>
 	>,
 	OptionalDefaultConstructor<MemberStatus::Defined, T>,
-	OptionalDefaultConstructor<MemberStatus::Deleted, T>
+	// never deleted
+	// OptionalDefaultConstructor<MemberStatus::Deleted, T>
+	OptionalDefaultConstructor<MemberStatus::Defined, T> 
 >;
 
 
 template <class T>
 using optional_copy_constructor_type = std::conditional_t<
-	std::disjunction<
+	std::disjunction_v<
 		detail::is_cv_void<T>,
 		std::is_copy_constructible<T>
 	>,
 	std::conditional_t<
-		std::disjunction<
+		std::disjunction_v<
 			detail::is_cv_void<T>,
 			std::is_trivially_copy_constructible<T>
 		>,
@@ -525,12 +543,12 @@ using optional_copy_constructor_type = std::conditional_t<
 
 template <class T>
 using optional_move_constructor_type = std::conditional_t<
-	std::disjunction<
+	std::disjunction_v<
 		detail::is_cv_void<T>,
 		std::is_move_constructible<T>
 	>,
 	std::conditional_t<
-		std::disjunction<
+		std::disjunction_v<
 			detail::is_cv_void<T>,
 			std::is_trivially_move_constructible<T>
 		>,
@@ -551,7 +569,7 @@ using optional_copy_assign_type = std::conditional_t<
 		>
 	>,
 	std::conditional_t<
-		std::disjunction<
+		std::disjunction_v<
 			detail::is_cv_void<T>,
 			std::conjunction<
 				std::negation<detail::is_cv_void<T>>,
@@ -573,12 +591,11 @@ using optional_move_assign_type = std::conditional_t<
 		std::conjunction<
 			std::negation<detail::is_cv_void<T>>,
 			std::is_move_assignable<T>,
-			std::is_move_constructible<T>,
-			std::is_trivially_destructible<T>
+			std::is_move_constructible<T>
 		>
 	>,
 	std::conditional_t<
-		std::disjunction<
+		std::disjunction_v<
 			detail::is_cv_void<T>,
 			std::conjunction<
 				std::is_trivially_move_assignable<T>,
@@ -746,7 +763,7 @@ struct OptionalCopyConstructor<MemberStatus::Defined, T>
 	using value_type = std::conditional_t<is_cv_void_v<T>, EmptyAlternative, T>;
 	
 	constexpr OptionalCopyConstructor() = default;
-	constexpr OptionalCopyConstructor(const OptionalCopyConstructor& other):
+	constexpr OptionalCopyConstructor(const OptionalCopyConstructor& other) noexcept(std::is_nothrow_copy_constructible_v<T>):
 		base_([&other]{
 			if(other.has_value()) {
 				return base_type(in_place, other.value());
@@ -855,7 +872,7 @@ struct OptionalMoveConstructor<MemberStatus::Defined, T> {
 	
 	constexpr OptionalMoveConstructor() = default;
 	constexpr OptionalMoveConstructor(const OptionalMoveConstructor&) = default;
-	constexpr OptionalMoveConstructor(OptionalMoveConstructor&& other):
+	constexpr OptionalMoveConstructor(OptionalMoveConstructor&& other) noexcept(std::is_nothrow_move_constructible_v<T>):
 		base_([&]{
 			if(other.has_value()) {
 				return base_type(in_place, std::move(other.value()));
@@ -969,8 +986,6 @@ struct OptionalCopyAssign<MemberStatus::Defined, T>:
 	constexpr OptionalCopyAssign& operator=(const OptionalCopyAssign& other) noexcept(
 		std::disjunction_v<detail::is_cv_void<T>, std::is_nothrow_copy_constructible<T>>
 		&& std::disjunction_v<detail::is_cv_void<T>, std::is_nothrow_copy_assignable<T>>
-		&& std::is_nothrow_copy_constructible_v<E>
-		&& std::is_nothrow_copy_assignable_v<E>
 	) {
 		if(this->has_value()) {
 			if(other.has_value()) {
@@ -1026,7 +1041,7 @@ struct OptionalMoveAssign<MemberStatus::Deleted, T>:
 	constexpr OptionalMoveAssign(const OptionalMoveAssign&) = default;
 	constexpr OptionalMoveAssign(OptionalMoveAssign&&) = default;
 	constexpr OptionalMoveAssign& operator=(const OptionalMoveAssign&) = default;
-	constexpr OptionalMoveAssign& operator=(OptionalMoveAssign&&) = delete;
+	// constexpr OptionalMoveAssign& operator=(OptionalMoveAssign&&) = delete;
 };
 
 template <class T>
@@ -1048,8 +1063,6 @@ struct OptionalMoveAssign<MemberStatus::Defined, T>:
 	constexpr OptionalMoveAssign& operator=(OptionalMoveAssign&& other) noexcept(
 		std::disjunction_v<detail::is_cv_void<T>, std::is_nothrow_move_constructible<T>>
 		&& std::disjunction_v<detail::is_cv_void<T>, std::is_nothrow_move_assignable<T>>
-		&& std::is_nothrow_move_constructible_v<E>
-		&& std::is_nothrow_move_assignable_v<E>
 	) {
 		if(this->has_value()) {
 			if(other.has_value()) {
@@ -1117,6 +1130,7 @@ struct is_optional<Optional<T>>: std::true_type {};
 
 template <class T>
 struct Optional {
+private:
 	static_assert(!std::is_reference_v<T>,
 		"Instantiating Optional<T> for reference type 'T' is not permitted.");
 	static_assert(!std::is_function_v<T>,
@@ -1127,10 +1141,7 @@ struct Optional {
 	template <class U>
 	friend struct Optional;
 
-private:
 	using data_type = detail::optional_data_type<T>;
-	static constexpr detail::in_place_t in_place = detail::in_place;
-	static constexpr detail::error_tag_t error_tag = detail::error_tag;
 public:
 
 	using value_type = T;
@@ -1142,7 +1153,7 @@ public:
 	template <
 		class U,
 		std::enable_if_t<
-			std::is_convertible<const U&, T>
+			!std::is_convertible_v<const U&, T>
 			&& !std::is_same_v<T, U>
 			&& std::conjunction_v<
 				std::is_constructible<T, const U&>,
@@ -1173,7 +1184,7 @@ public:
 	template <
 		class U,
 		std::enable_if_t<
-			std::is_convertible<const U&, T>
+			std::is_convertible_v<const U&, T>
 			&& !std::is_same_v<T, U>
 			&& std::conjunction_v<
 				std::is_constructible<T, const U&>,
@@ -1203,9 +1214,8 @@ public:
 
 	template <
 		class U,
-		class G,
 		std::enable_if_t<
-			std::is_convertible<U&&, T>
+			!std::is_convertible_v<U&&, T>
 			&& !std::is_same_v<T, U>
 			&& std::conjunction_v<
 				std::is_constructible<T, U&&>,
@@ -1235,9 +1245,8 @@ public:
 	
 	template <
 		class U,
-		class G,
 		std::enable_if_t<
-			std::is_convertible<U&&, T>,
+			std::is_convertible_v<U&&, T>
 			&& !std::is_same_v<T, U>
 			&& std::conjunction_v<
 				std::is_constructible<T, U&&>,
@@ -1271,7 +1280,7 @@ public:
 			std::conjunction_v<
 				std::negation<std::is_convertible<U&&, T>>,
 				std::is_constructible<T, U&&>,
-				std::negation<std::is_same<std::decay_t<U>, in_place_t>>,
+				// std::negation<std::is_same<std::decay_t<U>, in_place_t>>,
 				std::negation<std::is_same<std::decay_t<U>, nullopt_t>>,
 				std::negation<std::is_same<std::decay_t<U>, Optional>>
 			>,
@@ -1291,7 +1300,7 @@ public:
 				std::is_convertible<U&&, T>,
 				std::is_constructible<T, U&&>,
 				std::negation<std::is_same<std::decay_t<U>, in_place_t>>,
-				std::negation<std::is_same<std::decay_t<U>, nullopt_t>>,
+				// std::negation<std::is_same<std::decay_t<U>, nullopt_t>>,
 				std::negation<std::is_same<std::decay_t<U>, Optional>>
 			>,
 			bool
@@ -1326,7 +1335,7 @@ public:
 		> = false
 	>
 	constexpr explicit Optional(in_place_t, std::initializer_list<U> ilist, Args&& ... args) noexcept(
-		std::is_nothrow_constructible_v<E, std::initializer_list<U>, Args&&...>
+		std::is_nothrow_constructible_v<T, std::initializer_list<U>, Args&&...>
 	):
 		data_(in_place, ilist, std::forward<Args>(args)...)
 	{
@@ -1352,12 +1361,12 @@ public:
 	}
 
 	template <
-		class U,
+		class U=T,
 		std::enable_if_t<
 			std::conjunction_v<
 				std::negation<std::is_same<Optional, detail::remove_cvref_t<U>>>,
-    				std::is_constructible<T, U&&>,
-    				std::is_assignable<T&, U&&>,
+    				std::is_constructible<T, U>,
+    				std::is_assignable<T&, U>,
     				std::disjunction<
 					std::negation<std::is_scalar<T>>,
 					std::negation<std::is_same<T, std::decay_t<U>>>
@@ -1381,53 +1390,44 @@ public:
 	}
 
 	template <
-		class Opt,
+		class U,
 		std::enable_if_t<
 			std::conjunction_v<
-				detail::is_optional<std::decay_t<Opt>>,
-				std::negation<std::is_same_v<T, typename std::decay_t<Opt>>>,
-				std::negation<std::is_constructible<T, std::decay_t<Opt>&&>>>,
-				std::negation<std::is_constructible<T, const std::decay_t<Opt>&&>>>,
-				std::negation<std::is_constructible<T, std::decay_t<Opt>&>>>,
-				std::negation<std::is_constructible<T, const std::decay_t<Opt>&>>>,
-				std::negation<std::is_assignable<T&, std::decay_t<Opt>&&>>>,
-				std::negation<std::is_assignable<T&, const std::decay_t<Opt>&&>>>,
-				std::negation<std::is_assignable<T&, std::decay_t<Opt>&>>>,
-				std::negation<std::is_assignable<T&, const std::decay_t<Opt>&>>>,
-				std::negation<std::is_convertible<std::decay_t<Opt>&&, T>>>,
-				std::negation<std::is_convertible<const std::decay_t<Opt>&&, T>>>,
-				std::negation<std::is_convertible<std::decay_t<Opt>&, T>>>,
-				std::negation<std::is_convertible<const std::decay_t<Opt>&, T>>>,
-				std::conditional_t<
-					std::is_rvalue_reference_v<Opt&&>,
-					std::is_constructible<T, typename std::decay_t<Opt>::value_type>,
-					std::is_constructible<T, const typename std::decay_t<Opt>::value_type&>
-				>,
-				std::conditional_t<
-					std::is_rvalue_reference_v<Opt&&>,
-					std::is_assignable<T&, typename std::decay_t<Opt>::value_type>,
-					std::is_assignable<T&, const typename std::decay_t<Opt>::value_type&>
-				>
+				std::negation<std::is_same<T, U>>,
+				std::negation<std::is_constructible<T, Optional<U>&&>>,
+				std::negation<std::is_constructible<T, const Optional<U>&&>>,
+				std::negation<std::is_constructible<T, Optional<U>&>>,
+				std::negation<std::is_constructible<T, const Optional<U>&>>,
+				std::negation<std::is_assignable<T&, Optional<U>&&>>,
+				std::negation<std::is_assignable<T&, const Optional<U>&&>>,
+				std::negation<std::is_assignable<T&, Optional<U>&>>,
+				std::negation<std::is_assignable<T&, const Optional<U>&>>,
+				std::negation<std::is_convertible<Optional<U>&&, T>>,
+				std::negation<std::is_convertible<const Optional<U>&&, T>>,
+				std::negation<std::is_convertible<Optional<U>&, T>>,
+				std::negation<std::is_convertible<const Optional<U>&, T>>,
+				std::is_constructible<T, const U&>,
+				std::is_assignable<T&, const U&>
 			>,
 			bool
 		> = false
 
 	>
-	constexpr Optional& operator=(Opt&& v) noexcept(
-		std::is_nothrow_assignable_v<T&, U&&>
-		&& std::is_nothrow_constructible_v<T, U&&>
+	constexpr Optional& operator=(const Optional<U>& v) noexcept(
+		std::is_nothrow_assignable_v<T&, const U&>
+		&& std::is_nothrow_constructible_v<T, const U&>
 	)
 	{
 		if(this->has_value()) {
 			if(v.has_value()) {
-				data_.value() = *std::forward<Opt>(v);
+				data_.value() = *v;
 			} else {
 				data_.destruct();
 				data_.has_value() = false;
 			}
 		} else {
 			if(v.has_value()) {
-				data_.emplace(*std::forward<Opt>(v));
+				data_.emplace(*v);
 				data_.has_value() = true;
 			} else {
 				(void)0;
@@ -1436,6 +1436,52 @@ public:
 		return *this;
 	}
 
+	template <
+		class U,
+		std::enable_if_t<
+			std::conjunction_v<
+				std::negation<std::is_same<T, U>>,
+				std::negation<std::is_constructible<T, Optional<U>&&>>,
+				std::negation<std::is_constructible<T, const Optional<U>&&>>,
+				std::negation<std::is_constructible<T, Optional<U>&>>,
+				std::negation<std::is_constructible<T, const Optional<U>&>>,
+				std::negation<std::is_assignable<T&, Optional<U>&&>>,
+				std::negation<std::is_assignable<T&, const Optional<U>&&>>,
+				std::negation<std::is_assignable<T&, Optional<U>&>>,
+				std::negation<std::is_assignable<T&, const Optional<U>&>>,
+				std::negation<std::is_convertible<Optional<U>&&, T>>,
+				std::negation<std::is_convertible<const Optional<U>&&, T>>,
+				std::negation<std::is_convertible<Optional<U>&, T>>,
+				std::negation<std::is_convertible<const Optional<U>&, T>>,
+				std::is_constructible<T, U&&>,
+				std::is_assignable<T&, U&&>
+			>,
+			bool
+		> = false
+
+	>
+	constexpr Optional& operator=(Optional<U>&& v) noexcept(
+		std::is_nothrow_assignable_v<T&, U&&>
+		&& std::is_nothrow_constructible_v<T, U&&>
+	)
+	{
+		if(this->has_value()) {
+			if(v.has_value()) {
+				data_.value() = std::move(*v);
+			} else {
+				data_.destruct();
+				data_.has_value() = false;
+			}
+		} else {
+			if(v.has_value()) {
+				data_.emplace(std::move(*v));
+				data_.has_value() = true;
+			} else {
+				(void)0;
+			}
+		}
+		return *this;
+	}
 
 	template <
 		class ... Args,
@@ -1455,9 +1501,9 @@ public:
 			if(!data_.has_value()) {
 				data_.emplace(std::forward<Args>(args)...);
 			} else {
-				T tmp(std::move(data_.value());
+				T tmp(std::move(data_.value()));
 				data_.destruct();
-				auto guard = make_manual_scope_guard([&]() {
+				auto guard = detail::make_manual_scope_guard([&]() {
 					data_.emplace(std::move(tmp));
 				});
 				data_.emplace(std::forward<Args>(args)...);
@@ -1503,7 +1549,7 @@ public:
 	constexpr void swap(Other& other) noexcept(
 		std::conjunction_v<
 			std::is_nothrow_move_constructible<T>,
-			std::is_nothrow_swappable<T>,
+			std::is_nothrow_swappable<T>
 		>
 	) {
 		if(this->has_value()) {
@@ -1526,7 +1572,7 @@ public:
 		}
 	}
 
-	constexpr void reset() {
+	constexpr void reset() noexcept {
 		if(this->has_value()) {
 			data_.destruct();
 			data_.has_value() = false;
@@ -1535,19 +1581,19 @@ public:
 
 	constexpr T gut() {
 		assert_has_value();
-		auto guard = detail::make_manual_scope_guard([&data_](){
-			data_.destruct();
-			data_.has_value() = false;
+		auto guard = detail::make_manual_scope_guard([this](){
+			this->data_.destruct();
+			this->data_.has_value() = false;
 		});
 		return static_cast<T>(std::move(this->val()));
 	}
 	
 	
-	constexpr bool has_value() const {
+	constexpr bool has_value() const noexcept {
 		return this->data_.has_value();
 	}
 
-	explicit constexpr operator bool() const {
+	explicit constexpr operator bool() const noexcept {
 		return this->has_value();
 	}
 
@@ -1581,30 +1627,30 @@ public:
 		return this->val();
 	}
 
-	constexpr const T& value() const& {
+	constexpr const T& value() const& noexcept(false) {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
 		return this->val();
 	}
 
-	constexpr const T&& value() const&& {
+	constexpr const T&& value() const&& noexcept(false) {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
 		return std::move(this->val());
 	}
 
-	constexpr T& value() & {
+	constexpr T& value() & noexcept(false) {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
 		return this->val();
 	}
 
-	constexpr T&& value() && {
+	constexpr T&& value() && noexcept(false) {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
 		return std::move(this->val());
 	}
@@ -1651,7 +1697,7 @@ private:
 		return this->data_.value();
 	}
 
-	optional_data_type data_;
+	data_type data_;
 };
 
 template <>
@@ -1665,14 +1711,14 @@ struct Optional<void> {
 	Optional(const Optional&) = default;
 	Optional(Optional&&) = default;
 
-	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>>, bool> = false>
-	constexpr Optional(const Optional<U>& other) noexcept
+	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>, bool> = false>
+	constexpr Optional(const Optional<U>& other) noexcept:
 		has_value_(other.has_value())
 	{
 		
 	}
 
-	constexpr explicit Optional(in_place_t) noexcept
+	constexpr explicit Optional(in_place_t) noexcept:
 		has_value_(true)
 	{
 			
@@ -1696,8 +1742,10 @@ struct Optional<void> {
 		has_value_ = true;
 	}
 
-	constexpr void swap(Other& other) noexcept {
-		std::swap(has_value_, other.has_value_);
+	constexpr void swap(Optional& other) noexcept {
+		bool tmp = other.has_value_;
+		other.has_value_ = has_value_;
+		has_value_ = tmp;
 	}
 
 	constexpr void reset() noexcept {
@@ -1720,9 +1768,8 @@ struct Optional<void> {
 
 	constexpr void value() const {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
-		return this->val();
 	}
 
 private:
@@ -1753,14 +1800,14 @@ struct Optional<const void> {
 	Optional(const Optional&) = default;
 	Optional(Optional&&) = default;
 
-	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>>, bool> = false>
-	constexpr Optional(const Optional<U>& other) noexcept
+	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>, bool> = false>
+	constexpr Optional(const Optional<U>& other) noexcept:
 		has_value_(other.has_value())
 	{
 		
 	}
 
-	constexpr explicit Optional(in_place_t) noexcept
+	constexpr explicit Optional(in_place_t) noexcept:
 		has_value_(true)
 	{
 			
@@ -1784,8 +1831,10 @@ struct Optional<const void> {
 		has_value_ = true;
 	}
 
-	constexpr void swap(Other& other) noexcept {
-		std::swap(has_value_, other.has_value_);
+	constexpr void swap(Optional& other) noexcept {
+		bool tmp = other.has_value_;
+		other.has_value_ = has_value_;
+		has_value_ = tmp;
 	}
 
 	constexpr void reset() noexcept {
@@ -1808,9 +1857,8 @@ struct Optional<const void> {
 
 	constexpr void value() const {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
-		return this->val();
 	}
 
 private:
@@ -1841,14 +1889,14 @@ struct Optional<volatile void> {
 	Optional(const Optional&) = default;
 	Optional(Optional&&) = default;
 
-	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>>, bool> = false>
-	constexpr Optional(const Optional<U>& other) noexcept
+	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>, bool> = false>
+	constexpr Optional(const Optional<U>& other) noexcept:
 		has_value_(other.has_value())
 	{
 		
 	}
 
-	constexpr explicit Optional(in_place_t) noexcept
+	constexpr explicit Optional(in_place_t) noexcept:
 		has_value_(true)
 	{
 			
@@ -1872,8 +1920,10 @@ struct Optional<volatile void> {
 		has_value_ = true;
 	}
 
-	constexpr void swap(Other& other) noexcept {
-		std::swap(has_value_, other.has_value_);
+	constexpr void swap(Optional& other) noexcept {
+		bool tmp = other.has_value_;
+		other.has_value_ = has_value_;
+		has_value_ = tmp;
 	}
 
 	constexpr void reset() noexcept {
@@ -1896,9 +1946,8 @@ struct Optional<volatile void> {
 
 	constexpr void value() const {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
-		return this->val();
 	}
 
 private:
@@ -1929,14 +1978,14 @@ struct Optional<const volatile void> {
 	Optional(const Optional&) = default;
 	Optional(Optional&&) = default;
 
-	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>>, bool> = false>
-	constexpr Optional(const Optional<U>& other) noexcept
+	template <class U, std::enable_if_t<detail::is_cv_void_v<U> && !std::is_same_v<value_type, U>, bool> = false>
+	constexpr Optional(const Optional<U>& other) noexcept:
 		has_value_(other.has_value())
 	{
 		
 	}
 
-	constexpr explicit Optional(in_place_t) noexcept
+	constexpr explicit Optional(in_place_t) noexcept:
 		has_value_(true)
 	{
 			
@@ -1960,8 +2009,10 @@ struct Optional<const volatile void> {
 		has_value_ = true;
 	}
 
-	constexpr void swap(Other& other) noexcept {
-		std::swap(has_value_, other.has_value_);
+	constexpr void swap(Optional& other) noexcept {
+		bool tmp = other.has_value_;
+		other.has_value_ = has_value_;
+		has_value_ = tmp;
 	}
 
 	constexpr void reset() noexcept {
@@ -1984,9 +2035,8 @@ struct Optional<const volatile void> {
 
 	constexpr void value() const {
 		if(!this->has_value()) {
-			throw_bad_optional_access();
+			throw BadOptionalAccess();
 		}
-		return this->val();
 	}
 
 private:
@@ -2006,13 +2056,14 @@ private:
 	bool has_value_ = false;
 };
 
+
 namespace traits::detail {
 
 template <class R1, class R2>
-struct results_are_equality_comparable{};
+struct optionals_are_equality_comparable{};
 
-template <class T1, class E1, class T2, class E2>
-struct results_are_equality_comparable<Optional<T1, E1>, Optional<T2, E2>> {
+template <class T1, class T2>
+struct optionals_are_equality_comparable<Optional<T1>, Optional<T2>> {
 	template <class T>
 	struct Tag {};
 
@@ -2034,26 +2085,24 @@ struct results_are_equality_comparable<Optional<T1, E1>, Optional<T2, E2>> {
 	template <class T, class U>
 	static constexpr std::false_type is_eq_comp(Tag<T>, Tag<U>, ...) { return std::false_type{}; }
 	
-	static constexpr bool value = std::conjunction_v<
-		std::disjunction<
-			std::conjunction<
-				::tim::result::detail::is_cv_void<T1>,
-				::tim::result::detail::is_cv_void<T2>
-			>,
-			decltype(is_eq_comp(Tag<T1>{}, Tag<T2>{}, 0))
+	static constexpr bool value = std::disjunction_v<
+		std::conjunction<
+			::tim::optional::detail::is_cv_void<T1>,
+			::tim::optional::detail::is_cv_void<T2>
 		>,
-		decltype(is_eq_comp(Tag<E1>{}, Tag<E2>{}, 0))
+		decltype(is_eq_comp(Tag<T1>{}, Tag<T2>{}, 0))
 	>;
 };
 
 template <class R1, class R2>
-inline constexpr bool results_are_equality_comparable_v
-	= results_are_equality_comparable<R1, R2>::value;
+inline constexpr bool optionals_are_equality_comparable_v
+	= optionals_are_equality_comparable<R1, R2>::value;
 
 template <class R1, class R2>
-struct results_are_inequality_comparable{};
-template <class T1, class E1, class T2, class E2>
-struct results_are_inequality_comparable<Optional<T1, E1>, Optional<T2, E2>> {
+struct optionals_are_inequality_comparable{};
+
+template <class T1, class T2>
+struct optionals_are_inequality_comparable<Optional<T1>, Optional<T2>> {
 	template <class T>
 	struct Tag {};
 
@@ -2075,234 +2124,448 @@ struct results_are_inequality_comparable<Optional<T1, E1>, Optional<T2, E2>> {
 	template <class T, class U>
 	static constexpr std::false_type is_eq_comp(Tag<T>, Tag<U>, ...) { return std::false_type{}; }
 	
-	static constexpr bool value = std::conjunction_v<
-		std::disjunction<
-			std::conjunction<
-				::tim::result::detail::is_cv_void<T1>,
-				::tim::result::detail::is_cv_void<T2>
-			>,
-			decltype(is_eq_comp(Tag<T1>{}, Tag<T2>{}, 0))
+	static constexpr bool value = std::disjunction_v<
+		std::conjunction<
+			::tim::optional::detail::is_cv_void<T1>,
+			::tim::optional::detail::is_cv_void<T2>
 		>,
-		decltype(is_eq_comp(Tag<E1>{}, Tag<E2>{}, 0))
+		decltype(is_eq_comp(Tag<T1>{}, Tag<T2>{}, 0))
 	>;
 };
 
 template <class R1, class R2>
-inline constexpr bool results_are_inequality_comparable_v
-	= results_are_inequality_comparable<R1, R2>::value;
+inline constexpr bool optionals_are_inequality_comparable_v
+	= optionals_are_inequality_comparable<R1, R2>::value;
 
 
 } /* namespace traits::detail */
 
 /* --- Equality Operators --- */
-template <
-	class T1, class E1,
-	class T2, class E2,
-	std::enable_if_t<
-		traits::detail::results_are_equality_comparable_v<Optional<T1, E1>, Optional<T2, E2>>,
-		bool
-	> = false
->
-constexpr bool operator==(const Optional<T1, E1>& lhs, const Optional<T2, E2>& rhs) {
-	if(lhs.has_value()) {
-		if(rhs.has_value()) {
-			if constexpr(!detail::is_cv_void_v<T1>) {
-				return *lhs == *rhs;
-			} else {
-				return true;
-			}
-		}
-		return false;
-	} else {
-		if(!rhs.has_value()) {
-			return lhs.error() == rhs.error();
-		}
-		return false;
-	}
+template <class T>
+constexpr bool operator==(const Optional<T>& lhs, nullopt_t rhs) noexcept {
+	(void)rhs;
+	return !lhs;
+}
+
+template <class T>
+constexpr bool operator==(nullopt_t lhs, const Optional<T>& rhs) noexcept {
+	(void)lhs;
+	return !rhs;
 }
 
 template <
 	class T1,
-	class E1,
 	class T2,
 	std::enable_if_t<
 		!detail::is_cv_void_v<T1>
-		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() == std::declval<T2&&>())>
-		&& !traits::is_result_v<std::decay_t<T2>>
-		&& !traits::is_error_v<std::decay_t<T2>>,
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() == std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
 		bool
 	> = false
 >
-constexpr bool operator==(const Optional<T1, E1>& lhs, T2&& rhs) {
-	if(lhs.has_value()) {
-		return *lhs == std::forward<T2>(rhs);
+constexpr bool operator==(const Optional<T1>& lhs, const T2& rhs) noexcept(noexcept(std::declval<const T1&>() == std::declval<const T2&>())) {
+	return lhs && (*lhs == rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() == std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator==(const T1& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() == std::declval<const T2&>())) {
+	return rhs && (lhs == *rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() == std::declval<const T2&>())>,
+		bool
+	> = false
+>
+constexpr bool operator==(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() == std::declval<const T2&>())) {
+	if(lhs) {
+		return rhs && (*lhs != *rhs);
 	} else {
-		return false;
+		return nullopt == rhs;
 	}
 }
 
 template <
 	class T1,
 	class T2,
-	class E2,
 	std::enable_if_t<
-		!detail::is_cv_void_v<T2>
-		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<T1&&>() == std::declval<const T2&>())>
-		&& !traits::is_result_v<T1>
-		&& !traits::is_error_v<T1>,
+		detail::is_cv_void_v<T1> && detail::is_cv_void_v<T2>,
 		bool
 	> = false
 >
-constexpr bool operator==(T1&& lhs, const Optional<T2, E2>& rhs) {
-	if(rhs.has_value()) {
-		return std::forward<T1>(lhs) == *rhs;
-	} else {
-		return false;
-	}
-}
-
-template <
-	class T1,
-	class E1,
-	class E2,
-	std::enable_if_t<
-		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const E1&>() == std::declval<const E2&>())>,
-		bool
-	> = false
->
-constexpr bool operator==(const Optional<T1, E1>& lhs, const Error<E2>& rhs) {
-	if(lhs.has_value()) {
-		return false;
-	}
-	return lhs.error() == rhs.value();
-}
-
-template <
-	class E1,
-	class T2,
-	class E2,
-	std::enable_if_t<
-		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const E1&>() == std::declval<const E2&>())>,
-		bool
-	> = false
->
-constexpr bool operator==(const Error<E1>& lhs, const Optional<T2, E2>& rhs) {
-	if(rhs.has_value()) {
-		return false;
-	}
-	return lhs.value() == rhs.error();
+constexpr bool operator==(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept {
+	return lhs.has_value() == rhs.has_value();
 }
 
 /* --- Inequality Operators --- */
-template <
-	class T1, class E1,
-	class T2, class E2,
-	std::enable_if_t<
-		traits::detail::results_are_inequality_comparable_v<Optional<T1, E1>, Optional<T2, E2>>,
-		bool
-	> = false
->
-constexpr bool operator!=(const Optional<T1, E1>& lhs, const Optional<T2, E2>& rhs) {
-	static_assert(detail::is_cv_void_v<T1> == detail::is_cv_void_v<T2>);
-	if(lhs.has_value()) {
-		if(rhs.has_value()) {
-			if constexpr(!detail::is_cv_void_v<T1>) {
-				return *lhs != *rhs;
-			} else {
-				return false;
-			}
-		}
-		return true;
-	} else {
-		if(!rhs.has_value()) {
-			return lhs.error() != rhs.error();
-		}
-		return true;
-	}
+template <class T>
+constexpr bool operator!=(const Optional<T>& lhs, nullopt_t rhs) noexcept {
+	(void)rhs;
+	return lhs.has_value();
+}
+
+template <class T>
+constexpr bool operator!=(nullopt_t lhs, const Optional<T>& rhs) noexcept {
+	(void)lhs;
+	return rhs.has_value();
 }
 
 template <
 	class T1,
-	class E1,
 	class T2,
 	std::enable_if_t<
 		!detail::is_cv_void_v<T1>
-		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() != std::declval<T2&&>())>
-		&& !traits::is_result_v<std::decay_t<T2>>
-		&& !traits::is_error_v<std::decay_t<T2>>,
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() != std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
 		bool
 	> = false
 >
-constexpr bool operator!=(const Optional<T1, E1>& lhs, T2&& rhs) {
-	if(lhs.has_value()) {
-		return *lhs != std::forward<T2>(rhs);
+constexpr bool operator!=(const Optional<T1>& lhs, const T2& rhs) noexcept(noexcept(std::declval<const T1&>() != std::declval<const T2&>())) {
+	return !lhs || (*lhs != rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() != std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator!=(const T1& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() != std::declval<const T2&>())) {
+	return !rhs || (lhs != *rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() != std::declval<const T2&>())>,
+		bool
+	> = false
+>
+constexpr bool operator!=(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() != std::declval<const T2&>())) {
+	if(lhs) {
+		return !rhs || (*lhs != *rhs);
 	} else {
-		return true;
+		return nullopt != rhs;
 	}
 }
 
 template <
 	class T1,
 	class T2,
-	class E2,
 	std::enable_if_t<
-		!detail::is_cv_void_v<T2>
-		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<T1&&>() != std::declval<const T2&>())>
-		&& !traits::is_result_v<T1>
-		&& !traits::is_error_v<T1>,
+		detail::is_cv_void_v<T1> && detail::is_cv_void_v<T2>,
 		bool
 	> = false
 >
-constexpr bool operator!=(T1&& lhs, const Optional<T2, E2>& rhs) {
-	if(rhs.has_value()) {
-		return std::forward<T1>(lhs) != *rhs;
+constexpr bool operator!=(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept {
+	return lhs.has_value() != rhs.has_value();
+}
+
+/* --- Less Than Operators --- */
+template <class T>
+constexpr bool operator<(const Optional<T>& lhs, nullopt_t rhs) noexcept {
+	(void)lhs;
+	(void)rhs;
+	return false;
+}
+
+template <class T>
+constexpr bool operator<(nullopt_t lhs, const Optional<T>& rhs) noexcept {
+	(void)lhs;
+	return rhs.has_value();
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() < std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator<(const Optional<T1>& lhs, const T2& rhs) noexcept(noexcept(std::declval<const T1&>() < std::declval<const T2&>())) {
+	return !lhs || (*lhs < rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() < std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator<(const T1& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() < std::declval<const T2&>())) {
+	return rhs && (lhs < *rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() < std::declval<const T2&>())>,
+		bool
+	> = false
+>
+constexpr bool operator<(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() < std::declval<const T2&>())) {
+	if(lhs) {
+		return rhs && (*lhs < *rhs);
 	} else {
-		return true;
+		return nullopt < rhs;
 	}
 }
 
 template <
 	class T1,
-	class E1,
-	class E2,
+	class T2,
 	std::enable_if_t<
-		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const E1&>() != std::declval<const E2&>())>,
+		detail::is_cv_void_v<T1> && detail::is_cv_void_v<T2>,
 		bool
 	> = false
 >
-constexpr bool operator!=(const Optional<T1, E1>& lhs, const Error<E2>& rhs) {
-	if(lhs.has_value()) {
-		return true;
-	}
-	return lhs.error() != rhs.value();
+constexpr bool operator<(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept {
+	return (!lhs) && rhs;
+}
+
+/* --- Less Equal Operators --- */
+template <class T>
+constexpr bool operator<=(const Optional<T>& lhs, nullopt_t rhs) noexcept {
+	(void)rhs;
+	return !lhs;
+}
+
+template <class T>
+constexpr bool operator<=(nullopt_t lhs, const Optional<T>& rhs) noexcept {
+	(void)lhs;
+	(void)rhs;
+	return true;
 }
 
 template <
-	class E1,
+	class T1,
 	class T2,
-	class E2,
 	std::enable_if_t<
-		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const E1&>() != std::declval<const E2&>())>,
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() <= std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
 		bool
 	> = false
 >
-constexpr bool operator!=(const Error<E1>& lhs, const Optional<T2, E2>& rhs) {
-	if(rhs.has_value()) {
-		return true;
-	}
-	return lhs.value() != rhs.error();
+constexpr bool operator<=(const Optional<T1>& lhs, const T2& rhs) noexcept(noexcept(std::declval<const T1&>() <= std::declval<const T2&>())) {
+	return !lhs || (*lhs <= rhs);
 }
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() <= std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator<=(const T1& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() <= std::declval<const T2&>())) {
+	return rhs && (lhs <= *rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() <= std::declval<const T2&>())>,
+		bool
+	> = false
+>
+constexpr bool operator<=(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() <= std::declval<const T2&>())) {
+	if(lhs) {
+		return rhs && (*lhs <= *rhs);
+	} else {
+		return nullopt <= rhs;
+	}
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		detail::is_cv_void_v<T1> && detail::is_cv_void_v<T2>,
+		bool
+	> = false
+>
+constexpr bool operator<=(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept {
+	return !lhs || rhs;
+}
+
+/* --- Greater Than Operators --- */
+template <class T>
+constexpr bool operator>(const Optional<T>& lhs, nullopt_t rhs) noexcept {
+	(void)rhs;
+	return lhs.has_value();
+}
+
+template <class T>
+constexpr bool operator>(nullopt_t lhs, const Optional<T>& rhs) noexcept {
+	(void)lhs;
+	(void)rhs;
+	return false;
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() > std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator>(const Optional<T1>& lhs, const T2& rhs) noexcept(noexcept(std::declval<const T1&>() > std::declval<const T2&>())) {
+	return lhs && (*lhs > rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() > std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator>(const T1& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() > std::declval<const T2&>())) {
+	return !rhs || (lhs > *rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() > std::declval<const T2&>())>,
+		bool
+	> = false
+>
+constexpr bool operator>(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() > std::declval<const T2&>())) {
+	if(lhs) {
+		return !rhs || (*lhs > *rhs);
+	} else {
+		return nullopt > rhs;
+	}
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		detail::is_cv_void_v<T1> && detail::is_cv_void_v<T2>,
+		bool
+	> = false
+>
+constexpr bool operator>(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept {
+	return lhs && !rhs;
+}
+
+/* --- Greater Equal Operators --- */
+template <class T>
+constexpr bool operator>=(const Optional<T>& lhs, nullopt_t rhs) noexcept {
+	(void)lhs;
+	(void)rhs;
+	return true;
+}
+
+template <class T>
+constexpr bool operator>=(nullopt_t lhs, const Optional<T>& rhs) noexcept {
+	(void)lhs;
+	return !rhs;
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() >= std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator>=(const Optional<T1>& lhs, const T2& rhs) noexcept(noexcept(std::declval<const T1&>() >= std::declval<const T2&>())) {
+	return lhs && (*lhs >= rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		!detail::is_cv_void_v<T1>
+		&& traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() >= std::declval<const T2&>())>
+		&& !std::is_same_v<T2, nullopt_t>,
+		bool
+	> = false
+>
+constexpr bool operator>=(const T1& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() >= std::declval<const T2&>())) {
+	return !rhs || (lhs >= *rhs);
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		traits::detail::is_contextually_convertible_to_bool_v<decltype(std::declval<const T1&>() >= std::declval<const T2&>())>,
+		bool
+	> = false
+>
+constexpr bool operator>=(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() >= std::declval<const T2&>())) {
+	if(lhs) {
+		return !rhs || (*lhs >= *rhs);
+	} else {
+		return nullopt >= rhs;
+	}
+}
+
+template <
+	class T1,
+	class T2,
+	std::enable_if_t<
+		detail::is_cv_void_v<T1> && detail::is_cv_void_v<T2>,
+		bool
+	> = false
+>
+constexpr bool operator>=(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept {
+	return lhs || !rhs;
+}
+
+
 
 template <
 	class T,
-	class E,
 	std::enable_if_t<
 		!detail::is_cv_void_v<T>
 		&& std::is_move_constructible_v<T>
-		&& std::is_swappable_v<T>
-		&& std::is_move_constructible_v<E>
-		&& std::is_swappable_v<E>
-		&& (std::is_nothrow_move_constructible_v<T> || std::is_nothrow_move_constructible_v<E>),
+		&& std::is_swappable_v<T>,
 		bool
 	> = false
 >
@@ -2310,60 +2573,105 @@ constexpr void swap(Optional<T>& lhs, Optional<T>& rhs) noexcept(noexcept(lhs.sw
 	return lhs.swap(rhs);
 }
 
-template <
-	class T,
-	class E,
-	std::enable_if_t<
-		std::is_move_constructible_v<E>
-		&& std::is_swappable_v<E>,
-		bool
-	> = false
->
-constexpr void swap(Optional<void, E>& lhs, Optional<void, E>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
+constexpr void swap(Optional<void>& lhs, Optional<void>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
 	return lhs.swap(rhs);
 }
 
-template <
-	class T,
-	class E,
-	std::enable_if_t<
-		std::is_move_constructible_v<E>
-		&& std::is_swappable_v<E>,
-		bool
-	> = false
->
-constexpr void swap(Optional<const void, E>& lhs, Optional<const void, E>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
+constexpr void swap(Optional<const void>& lhs, Optional<const void>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
 	return lhs.swap(rhs);
 }
 
-template <
-	class T,
-	class E,
-	std::enable_if_t<
-		std::is_move_constructible_v<E>
-		&& std::is_swappable_v<E>,
-		bool
-	> = false
->
-constexpr void swap(Optional<volatile void, E>& lhs, Optional<volatile void, E>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
+constexpr void swap(Optional<volatile void>& lhs, Optional<volatile void>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
 	return lhs.swap(rhs);
 }
 
-template <
-	class T,
-	class E,
-	std::enable_if_t<
-		std::is_move_constructible_v<E>
-		&& std::is_swappable_v<E>,
-		bool
-	> = false
->
-constexpr void swap(Optional<const volatile void, E>& lhs, Optional<const volatile void, E>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
+constexpr void swap(Optional<const volatile void>& lhs, Optional<const volatile void>& rhs) noexcept(noexcept(lhs.swap(rhs))) {
 	return lhs.swap(rhs);
 }
+
+template <class T>
+Optional(T) -> Optional<T>;
+
+template <class T>
+constexpr Optional<std::decay_t<T>> make_optional(T&& value) {
+	return Optional<std::decay_t<T>>(std::forward<T>(value));
+}
+
+template <class T, class ... Args>
+constexpr Optional<T> make_optional(Args&& ... args) {
+	return Optional<T>(tim::in_place, std::forward<Args>(args) ... );
+}
+
+template <class T, class U, class ... Args>
+constexpr Optional<T> make_optional(std::initializer_list<U> ilist, Args&& ... args) {
+	return Optional<T>(tim::in_place, ilist, std::forward<Args>(args) ... );
+}
+
+template <class T>
+constexpr Optional<std::decay_t<T>> some(T&& value) {
+	return Optional<std::decay_t<T>>(std::forward<T>(value));
+}
+
+namespace hash_detail {
+
+template <
+	class T,
+	bool = std::is_default_constructible_v<std::hash<std::remove_const_t<T>>>
+		&& std::is_copy_constructible_v<std::hash<std::remove_const_t<T>>>
+		&& std::is_move_constructible_v<std::hash<std::remove_const_t<T>>>
+		&& std::is_copy_assignable_v<std::hash<std::remove_const_t<T>>>
+		&& std::is_move_assignable_v<std::hash<std::remove_const_t<T>>>
+>
+struct OptionalHashBase;
+
+template <class T>
+struct OptionalHashBase<T, true> {
+	OptionalHashBase() = default;
+	OptionalHashBase(const OptionalHashBase&) = default;
+	OptionalHashBase(OptionalHashBase&&) = default;
+	OptionalHashBase& operator=(const OptionalHashBase&) = default;
+	OptionalHashBase& operator=(OptionalHashBase&&) = default;
+
+	constexpr std::size_t operator()(const tim::optional::Optional<T>& v) const
+		noexcept(noexcept(std::hash<std::remove_const_t<T>>{}(std::declval<const T&>())))
+	{
+		return v ? std::hash<std::remove_const_t<T>>{}(*v) : 0;
+	}
+};
+
+template <class T>
+struct OptionalHashBase<T, false> {
+	OptionalHashBase() = delete;
+	OptionalHashBase(const OptionalHashBase&) = delete;
+	OptionalHashBase(OptionalHashBase&&) = delete;
+	OptionalHashBase& operator=(const OptionalHashBase&) = delete;
+	OptionalHashBase& operator=(OptionalHashBase&&) = delete;
+	
+	constexpr std::size_t operator()(const tim::optional::Optional<T>& v) const = delete;
+};
+
+} /* namespace hash_detail */
 
 } /* inline namespace optional */
 
 } /* namespace tim */
+
+namespace std {
+
+template <class T>
+struct hash<tim::optional::Optional<T>>: private ::tim::optional::hash_detail::OptionalHashBase<T> {
+private:
+	using base_type = ::tim::optional::hash_detail::OptionalHashBase<T>;
+public:
+	hash() = default;
+	hash(const hash&) = default;
+	hash(hash&&) = default;
+	hash& operator=(const hash&) = default;
+	hash& operator=(hash&&) = default;
+	using base_type::operator();
+};
+
+} /* namespace std */
+
 
 #endif /* TIM_OPTIONAL_OPTIONAL_HPP */
