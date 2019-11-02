@@ -7,6 +7,12 @@
 
 namespace tim {
 
+#ifndef TIM_IN_PLACE_T_DEFINED
+#define TIM_IN_PLACE_T_DEFINED
+struct in_place_t {};
+inline constexpr in_place_t in_place = in_place_t{};
+#endif /* TIM_IN_PLACE_T_DEFINED */
+
 inline namespace optional {
 
 template <class T>
@@ -19,20 +25,12 @@ namespace detail {
 struct empty_tag_t {};
 inline constexpr empty_tag_t empty_tag = empty_tag_t{};
 
+struct nullopt_constructor_t {};
+
 } /* namespace detail */
 
-struct in_place_t {};
-inline constexpr in_place_t in_place = in_place_t{};
-
 struct nullopt_t {
-	nullopt_t() = delete;
-	nullopt_t(const nullopt_t&) = default;
-	nullopt_t(nullopt_t&&) = default;
-	explicit constexpr nullopt_t(int) noexcept {}
-
-	nullopt_t& operator=(const nullopt_t&) = default;
-	nullopt_t& operator=(nullopt_t&&) = default;
-
+	explicit constexpr nullopt_t(detail::nullopt_constructor_t) noexcept {}
 };
 inline constexpr nullopt_t nullopt = nullopt_t{{}};
 
@@ -128,7 +126,7 @@ struct ValueWrapper<T, false> {
 			bool
 		> = false
 	>
-	constexpr ValueWrapper(Args&& ... args):
+	constexpr ValueWrapper(tim::in_place_t, Args&& ... args):
 		value_(std::forward<Args>(args)...)
 	{
 
@@ -142,7 +140,7 @@ struct ValueWrapper<T, false> {
 			bool
 		> = false
 	>
-	constexpr ValueWrapper(std::initializer_list<U> ilist, Args&& ... args):
+	constexpr ValueWrapper(tim::in_place_t, std::initializer_list<U> ilist, Args&& ... args):
 		value_(ilist, std::forward<Args>(args)...)
 	{
 
@@ -185,7 +183,7 @@ struct ValueWrapper<T, true>: private T {
 			bool
 		> = false
 	>
-	constexpr ValueWrapper(Args&& ... args):
+	constexpr ValueWrapper(tim::in_place_t, Args&& ... args):
 		value_type(std::forward<Args>(args)...)
 	{
 
@@ -199,7 +197,7 @@ struct ValueWrapper<T, true>: private T {
 			bool
 		> = false
 	>
-	constexpr ValueWrapper(std::initializer_list<U> ilist, Args&& ... args):
+	constexpr ValueWrapper(tim::in_place_t, std::initializer_list<U> ilist, Args&& ... args):
 		value_type(ilist, std::forward<Args>(args)...)
 	{
 
@@ -224,7 +222,7 @@ struct OptionalUnionImpl<MemberStatus::Defaulted, T> {
 	constexpr OptionalUnionImpl& operator=(const OptionalUnionImpl&) = default;
 	constexpr OptionalUnionImpl& operator=(OptionalUnionImpl&&) = default;
 
-	constexpr OptionalUnionImpl(detail::empty_tag_t):
+	constexpr OptionalUnionImpl(detail::empty_tag_t) noexcept:
 		hidden_{}
 	{
 	
@@ -232,7 +230,7 @@ struct OptionalUnionImpl<MemberStatus::Defaulted, T> {
 
 	template <class ... Args>
 	constexpr OptionalUnionImpl(in_place_t, Args&& ... args):
-		value(std::forward<Args>(args)...)
+		value(tim::in_place, std::forward<Args>(args)...)
 	{
 		
 	}
@@ -256,7 +254,7 @@ struct OptionalUnionImpl<MemberStatus::Deleted, T> {
 
 	~OptionalUnionImpl() = delete;	
 
-	constexpr OptionalUnionImpl(detail::empty_tag_t):
+	constexpr OptionalUnionImpl(detail::empty_tag_t) noexcept:
 		hidden_{}
 	{
 	
@@ -264,7 +262,7 @@ struct OptionalUnionImpl<MemberStatus::Deleted, T> {
 
 	template <class ... Args>
 	constexpr OptionalUnionImpl(in_place_t, Args&& ... args):
-		value(std::forward<Args>(args)...)
+		value(tim::in_place, std::forward<Args>(args)...)
 	{
 		
 	}
@@ -296,7 +294,7 @@ struct OptionalUnionImpl<MemberStatus::Defined, T> {
 
 	template <class ... Args>
 	constexpr OptionalUnionImpl(in_place_t, Args&& ... args):
-		value(std::forward<Args>(args)...)
+		value(tim::in_place, std::forward<Args>(args)...)
 	{
 		
 	}
@@ -402,7 +400,7 @@ struct OptionalBaseMethods<T, false> {
 	}
 
 	template <class ... Args>
-	constexpr OptionalBaseMethods(detail::empty_tag_t):
+	constexpr OptionalBaseMethods(detail::empty_tag_t) noexcept:
 		has_value_(false),
 		data_(detail::empty_tag)
 	{
@@ -425,16 +423,11 @@ struct OptionalBaseMethods<T, false> {
 	constexpr void emplace(Args&& ... args)
 		noexcept(std::is_nothrow_constructible_v<value_type, Args&&...>)
 	{
-		new (std::addressof(data_.value)) ValueWrapper<T>(std::forward<Args>(args)...);
+		new (std::addressof(data_.value)) ValueWrapper<T>(tim::in_place, std::forward<Args>(args)...);
 	}
 
 	constexpr void destruct() noexcept {
-		if constexpr(
-			std::conjunction_v<
-				std::negation<is_cv_void<T>>,
-				std::negation<std::is_trivially_destructible<T>>
-			>
-		) {
+		if constexpr(!std::is_trivially_destructible_v<T>) {
 			std::destroy_at(std::addressof(data_.value));
 		}
 	}
@@ -454,7 +447,7 @@ struct OptionalBaseMethods<T, true> {
 
 	constexpr OptionalBaseMethods() = default;
 
-	constexpr OptionalBaseMethods(in_place_t):
+	constexpr OptionalBaseMethods(in_place_t) noexcept:
 		has_value_(true)
 	{
 		
@@ -652,7 +645,9 @@ struct OptionalDestructor<MemberStatus::Defined, T>:
 	constexpr OptionalDestructor& operator=(OptionalDestructor&&) = default;
 
 	~OptionalDestructor() {
-		this->destruct();
+		if(this->has_value()) {
+			this->destruct();
+		}
 	}
 };
 
@@ -706,7 +701,7 @@ struct OptionalDefaultConstructor<MemberStatus::Defined, T>:
 	using base_type::emplace;
 	using base_type::throw_bad_optional_access;
 	
-	constexpr OptionalDefaultConstructor() noexcept(std::is_nothrow_default_constructible_v<T>):
+	constexpr OptionalDefaultConstructor() noexcept:
 		base_type(detail::empty_tag)
 	{
 		
@@ -1135,7 +1130,7 @@ private:
 		"Instantiating Optional<T> for reference type 'T' is not permitted.");
 	static_assert(!std::is_function_v<T>,
 		"Instantiating Optional<T> for function type 'T' is not permitted.");
-	static_assert(!std::is_same_v<tim::optional::in_place_t, std::remove_cv_t<T>>,
+	static_assert(!std::is_same_v<tim::in_place_t, std::remove_cv_t<T>>,
 		"Instantiating Optional<T> where 'T' is const- or volatile-qualified 'in_place_t' is not permitted.");
 
 	template <class U>
@@ -1497,19 +1492,19 @@ public:
 			}
 			data_.emplace(std::forward<Args>(args)...);
 			data_.has_value() = true;
-		} else if constexpr(std::is_nothrow_move_constructible_v<T>) {
-			if(!data_.has_value()) {
-				data_.emplace(std::forward<Args>(args)...);
-			} else {
-				T tmp(std::move(data_.value()));
-				data_.destruct();
-				auto guard = detail::make_manual_scope_guard([&]() {
-					data_.emplace(std::move(tmp));
-				});
-				data_.emplace(std::forward<Args>(args)...);
-				guard.active = false;
-				data_.has_value() = true;
-			}
+		// } else if constexpr(std::is_nothrow_move_constructible_v<T>) {
+		// 	if(!data_.has_value()) {
+		// 		data_.emplace(std::forward<Args>(args)...);
+		// 	} else {
+		// 		T tmp(std::move(data_.value()));
+		// 		data_.destruct();
+		// 		auto guard = detail::make_manual_scope_guard([&]() {
+		// 			data_.emplace(std::move(tmp));
+		// 		});
+		// 		data_.emplace(std::forward<Args>(args)...);
+		// 		guard.active = false;
+		// 	}
+		// 	data_.has_value() = true;
 		} else {
 			if(data_.has_value()) {
 				data_.destruct();
@@ -1532,7 +1527,34 @@ public:
 	constexpr T& emplace(std::initializer_list<U> ilist, Args&& ... args) noexcept(
 		std::is_nothrow_constructible_v<T, std::initializer_list<U>&, Args&&...>
 	) {
-		return this->emplace<std::initializer_list<U>&, Args...>(ilist, std::forward<Args>(args)...);
+		if constexpr(std::is_nothrow_constructible_v<T, std::initializer_list<U>&, Args&&...>) {
+			if(data_.has_value()) {
+				data_.destruct();
+			}
+			data_.emplace(ilist, std::forward<Args>(args)...);
+			data_.has_value() = true;
+		// } else if constexpr(std::is_nothrow_move_constructible_v<T>) {
+		// 	if(!data_.has_value()) {
+		// 		data_.emplace(ilist, std::forward<Args>(args)...);
+		// 	} else {
+		// 		T tmp(std::move(data_.value()));
+		// 		data_.destruct();
+		// 		auto guard = detail::make_manual_scope_guard([&]() {
+		// 			data_.emplace(std::move(tmp));
+		// 		});
+		// 		data_.emplace(ilist, std::forward<Args>(args)...);
+		// 		guard.active = false;
+		// 	}
+		// 	data_.has_value() = true;
+		} else {
+			if(data_.has_value()) {
+				data_.destruct();
+				data_.has_value() = false;
+			}
+			data_.emplace(ilist, std::forward<Args>(args)...);
+			data_.has_value() = true;
+		}
+		return this->val();
 	}
 
 	template <
@@ -1558,12 +1580,14 @@ public:
 				swap(this->val(), other.val());
 			} else {
 				other.data_.emplace(std::move(this->val()));
+				other.data_.has_value() = true;
 				this->data_.destruct();
 				this->data_.has_value() = false;
 			}
 		} else {
 			if(other.has_value()) {
 				data_.emplace(std::move(other.val()));
+				data_.has_value() = true;
 				other.data_.destruct();
 				other.data_.has_value() = false;
 			} else {
@@ -2191,7 +2215,7 @@ template <
 >
 constexpr bool operator==(const Optional<T1>& lhs, const Optional<T2>& rhs) noexcept(noexcept(std::declval<const T1&>() == std::declval<const T2&>())) {
 	if(lhs) {
-		return rhs && (*lhs != *rhs);
+		return rhs && (*lhs == *rhs);
 	} else {
 		return nullopt == rhs;
 	}

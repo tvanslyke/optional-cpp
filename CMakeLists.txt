@@ -46,7 +46,7 @@ if(OPTIONAL_ENABLE_TESTS)
 		if(MSVC)
 			target_compile_options(test_${NAME} PRIVATE /W4 /WX)
 		else()
-			target_compile_options(test_${NAME} PRIVATE -Wall -Wextra -pedantic -fmax-errors=1)
+			target_compile_options(test_${NAME} PRIVATE -Wall -Wextra -pedantic)
 		endif()
 		set_target_properties(test_${NAME} PROPERTIES LINKER_LANGUAGE CXX)
 		add_test(NAME ${NAME}

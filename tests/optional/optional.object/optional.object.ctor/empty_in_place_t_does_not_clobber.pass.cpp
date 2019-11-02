@@ -24,10 +24,11 @@
 
 using tim::Optional;
 
+struct Outer {
+  bool Dummy = true;
+};
 struct Wrapped {
-  struct Inner {
-    bool Dummy = true;
-  };
+  using Inner = Outer;
   tim::Optional<Inner> inner;
 };
 
